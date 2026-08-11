@@ -7,11 +7,12 @@ Minimal Mesa runtime for Intel GPU acceleration in QEMU, without the full Xorg a
 - Intel GPU support for QEMU
 - Supports the Mesa `i915`, `crocus`, and `iris` Gallium drivers
 - EGL and GBM support for headless hardware rendering
-- Includes the matching QEMU OpenGL display modules
 - LLVM is used during compilation but excluded from the final runtime
 - No Xorg server or Intel Xorg DDX driver required
 - Produces one self-contained Debian package
-- Provides `qemu-system-modules-opengl` and `libgbm1` without installing Debian's LLVM-backed Mesa runtime
+- Provides `libgbm1` without installing Debian's LLVM-backed Mesa runtime
+- Works independently of the QEMU point release because it contains no QEMU modules
+- Verifies compatibility with Debian's official `qemu-system-modules-opengl`
 - Verifies that packaged libraries have no direct or transitive LLVM dependencies
 
 ## Build
@@ -39,16 +40,16 @@ The generated `mesa-intel` package contains:
 
 - Mesa `i915`, `crocus`, and `iris` Gallium drivers
 - EGL and GBM libraries for headless hardware rendering
-- QEMU OpenGL display modules matching the configured QEMU version
 
-The package version-provides both:
+The package version-provides:
 
 ```text
-qemu-system-modules-opengl
 libgbm1
 ```
 
-and conflicts with/replaces their stock Debian packages. This lets other Debian packages satisfy their normal QEMU and GBM dependencies without pulling in `mesa-libgallium` and LLVM.
+and conflicts with/replaces Debian's stock `libgbm1`. This lets packages such as `qemu-system-modules-opengl` satisfy their normal GBM dependency without pulling in `mesa-libgallium` and LLVM.
+
+The QEMU OpenGL modules themselves are not included. They are installed from Debian alongside the matching QEMU version, so QEMU module build stamps always stay synchronized with the QEMU binaries.
 
 ## Verification
 
@@ -56,7 +57,7 @@ During the build, the package is automatically checked in two stages.
 
 The first stage scans every packaged ELF object with `readelf` and fails if any object directly depends on `libLLVM`.
 
-The finished package is then installed into a clean Debian Trixie image and checked with `ldd`. The build fails if:
+The finished package is then installed into a clean Debian Trixie image together with the official `qemu-system-x86` and `qemu-system-modules-opengl` packages from the configured Debian Sid snapshot. The build fails if:
 
 - Any runtime dependency cannot be resolved
 - LLVM appears anywhere in the runtime dependency tree
@@ -64,24 +65,27 @@ The finished package is then installed into a clean Debian Trixie image and chec
 - `mesa-libgallium` is installed
 - Any `libllvm` runtime package is installed
 
-The full dependency output is printed in the Docker build log.
+The full dependency output for both `mesa-intel` and the official QEMU OpenGL module is printed in the Docker build log.
 
 ## Usage
 
-Install the release package together with the matching QEMU packages:
+Install the release package in the same APT transaction as the matching QEMU OpenGL module:
 
 ```dockerfile
 ARG VERSION_MESA="1.00"
+ARG VERSION_QEMU="1:11.0.3+ds-2"
 
 RUN wget \
     "https://github.com/qemus/mesa-intel/releases/download/v${VERSION_MESA}/mesa-intel_${VERSION_MESA}_amd64.deb" \
     -O /tmp/mesa-intel.deb \
  && apt-get update \
- && apt-get --no-install-recommends -y install /tmp/mesa-intel.deb \
+ && apt-get --no-install-recommends -y -t sid install \
+      /tmp/mesa-intel.deb \
+      "qemu-system-modules-opengl=${VERSION_QEMU}" \
  && rm -f /tmp/mesa-intel.deb
 ```
 
-The package itself carries the QEMU OpenGL module dependency and the Intel Mesa runtime, so consumers do not need to install `xserver-xorg-video-intel`, `qemu-system-modules-opengl`, `libgbm1`, or `mesa-libgallium` separately.
+Because `mesa-intel` provides `libgbm1`, APT can satisfy the QEMU OpenGL module's GBM dependency without installing Debian's stock `libgbm1`, `mesa-libgallium`, or LLVM runtime.
 
 ## Intel drivers
 
@@ -93,4 +97,4 @@ The runtime includes Mesa support for multiple generations of Intel integrated g
 
 ## License
 
-Mesa and QEMU are distributed under their respective upstream licenses. The generated package includes the relevant upstream copyright and license information.
+Mesa is distributed under its respective upstream licenses. The generated package includes the relevant upstream copyright and license information.
