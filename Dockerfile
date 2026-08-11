@@ -2,6 +2,7 @@
 
 FROM debian:trixie-slim AS builder
 
+ARG VERSION_ARG="0.0"
 ARG MESA_VERSION="25.0.7"
 ARG DEBIAN_FRONTEND="noninteractive"
 
@@ -22,6 +23,7 @@ EOF_SOURCES
   apt-get install --no-install-recommends -y \
     binutils \
     curl \
+    dpkg-dev \
     file \
     gzip \
     meson \
@@ -44,7 +46,7 @@ RUN <<EOF_SOURCE
 EOF_SOURCE
 
 # Build Mesa's shader compiler tools with LLVM available. These tools are used
-# only while compiling the final Intel drivers and are never copied to /out.
+# only while compiling the final Intel drivers and are never packaged.
 RUN <<'EOF_TOOLS'
   set -eu
 
@@ -111,16 +113,16 @@ RUN <<'EOF_RUNTIME'
     -Dvulkan-layers=[]
 
   meson compile -C /build-runtime
-  meson install -C /build-runtime --destdir /out
+  meson install -C /build-runtime --destdir /mesa
 
   rm -rf \
-    /out/usr/include \
-    /out/usr/lib/*/pkgconfig \
-    /out/usr/share/doc \
-    /out/usr/share/man \
-    /out/usr/share/pkgconfig
+    /mesa/usr/include \
+    /mesa/usr/lib/*/pkgconfig \
+    /mesa/usr/share/doc \
+    /mesa/usr/share/man \
+    /mesa/usr/share/pkgconfig
 
-  find /out -type f -exec sh -c '
+  find /mesa -type f -exec sh -c '
     for file do
       if file "$file" | grep -q "ELF"; then
         strip --strip-unneeded "$file"
@@ -129,26 +131,85 @@ RUN <<'EOF_RUNTIME'
   ' sh {} +
 EOF_RUNTIME
 
-FROM builder AS verify
-
-# Test 1: every exported ELF object must be free of direct LLVM dependencies.
-# Test 2: print the complete dynamic dependency tree for every exported ELF
-# object, fail on unresolved libraries, and also reject transitive LLVM loads.
-RUN <<'EOF_VERIFY'
+# Package the Intel-only Mesa runtime as a replacement provider for libgbm1.
+# This lets Debian packages use the custom GBM implementation without pulling
+# the stock mesa-libgallium and LLVM runtime into the final image.
+RUN <<EOF_PACKAGE
   set -eu
 
   multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
-  export LD_LIBRARY_PATH="/out/usr/lib/${multiarch}"
+  libdir="/package/usr/lib/${multiarch}"
+
+  mkdir -p /package/DEBIAN
+  cp -a /mesa/. /package/
+
+  mkdir -p /package/usr/share/doc/mesa-intel
+  cp /src/mesa/docs/license.rst /package/usr/share/doc/mesa-intel/copyright.Mesa
+
+  # Add the Debian packages required by the custom Mesa runtime. Libraries
+  # shipped inside this package are intentionally excluded.
+  : > /tmp/depends
+
+  find /package/usr -type f -exec sh -c '
+    libdir=$1
+    shift
+
+    for file do
+      file "$file" | grep -q "ELF" || continue
+
+      LD_LIBRARY_PATH="$libdir" ldd "$file" 2>/dev/null \
+        | awk "
+            /=> \// { print \$3 }
+            /^[[:space:]]*\/[^ ]/ { print \$1 }
+          "
+    done
+  ' sh "$libdir" {} + \
+    | sort -u \
+    | while IFS= read -r library; do
+        [ -n "$library" ] || continue
+
+        case "$library" in
+          /package/*) continue ;;
+        esac
+
+        library="$(realpath "$library")"
+        owner="$(dpkg-query -S "$library" 2>/dev/null | head -n 1 || true)"
+        [ -n "$owner" ] || continue
+
+        owner="${owner%%:*}"
+        echo "$owner" >> /tmp/depends
+      done
+
+  sort -u /tmp/depends -o /tmp/depends
+  depends="$(paste -sd, /tmp/depends | sed 's/,/, /g')"
+  installed_size="$(du -sk /package/usr | cut -f1)"
+
+  cat > /package/DEBIAN/control <<EOF_CONTROL
+Package: mesa-intel
+Version: ${VERSION_ARG}
+Section: libs
+Priority: optional
+Architecture: amd64
+Maintainer: qemus <qemus@users.noreply.github.com>
+Depends: ${depends}
+Provides: libgbm1 (= ${MESA_VERSION})
+Conflicts: libgbm1
+Replaces: libgbm1
+Installed-Size: ${installed_size}
+Homepage: https://github.com/qemus/mesa-intel
+Description: Minimal Intel Mesa runtime for QEMU
+ Provides an Intel-only Mesa runtime supporting i915, Crocus and Iris together
+ with EGL and GBM, without an LLVM runtime dependency.
+EOF_CONTROL
 
   echo
-  echo "Using LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
-  echo
   echo "================================================================"
-  echo "Test 1: exported ELF objects must not depend directly on LLVM"
+  echo "Test 1: packaged ELF objects must not depend directly on LLVM"
   echo "================================================================"
 
   llvm_direct=0
-  for file in $(find /out -type f); do
+
+  for file in $(find /package/usr -type f); do
     file "$file" | grep -q "ELF" || continue
 
     echo
@@ -163,35 +224,107 @@ RUN <<'EOF_VERIFY'
   done
 
   if [ "$llvm_direct" -ne 0 ]; then
-    echo "FAIL: one or more exported objects directly depend on LLVM."
+    echo "FAIL: one or more packaged objects directly depend on LLVM."
     exit 1
   fi
 
+  echo
   echo "PASS: no direct LLVM dependencies found."
+
+  mkdir -p /dist
+  dpkg-deb \
+    --root-owner-group \
+    --build \
+    /package \
+    "/dist/mesa-intel_${VERSION_ARG}_amd64.deb"
 
   echo
   echo "================================================================"
-  echo "Test 2: ldd runtime dependency scan"
+  echo "Package metadata"
+  echo "================================================================"
+  dpkg-deb -I "/dist/mesa-intel_${VERSION_ARG}_amd64.deb"
+  echo
+  dpkg-deb -c "/dist/mesa-intel_${VERSION_ARG}_amd64.deb"
+  echo
+  du -h "/dist/mesa-intel_${VERSION_ARG}_amd64.deb"
+EOF_PACKAGE
+
+FROM debian:trixie-slim AS verify
+
+ARG VERSION_ARG="0.0"
+ARG VERSION_QEMU="1:11.0.3+ds-2"
+ARG DEBIAN_SNAPSHOT="20260809T204446Z"
+ARG DEBIAN_FRONTEND="noninteractive"
+
+COPY --from=builder /dist/ /dist/
+
+# Install the finished package together with the official matching QEMU OpenGL
+# module in a clean Trixie image. This verifies that mesa-intel satisfies the
+# libgbm1 dependency without pulling Debian's LLVM-backed Mesa runtime back in.
+RUN <<EOF_VERIFY
+  set -eu
+
+  apt-get update
+  apt-get install --no-install-recommends -y \
+    binutils \
+    ca-certificates \
+    file
+
+  echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ sid main" \
+    > /etc/apt/sources.list.d/qemu-snapshot.list
+
+  apt-get update
+  apt-get --no-install-recommends -y -t sid install \
+    "/dist/mesa-intel_${VERSION_ARG}_amd64.deb" \
+    "qemu-system-x86=${VERSION_QEMU}" \
+    "qemu-system-modules-opengl=${VERSION_QEMU}"
+
+  echo
+  echo "================================================================"
+  echo "Package isolation"
+  echo "================================================================"
+
+  for package in libgbm1 mesa-libgallium; do
+    if dpkg-query -W "$package" >/dev/null 2>&1; then
+      echo "FAIL: unwanted package was installed: $package"
+      exit 1
+    fi
+  done
+
+  if dpkg-query -W 'libllvm*' >/tmp/llvm-packages 2>/dev/null; then
+    cat /tmp/llvm-packages
+    echo "FAIL: an LLVM runtime package was installed."
+    exit 1
+  fi
+
+  echo "PASS: stock libgbm1, mesa-libgallium and LLVM are absent."
+
+  echo
+  echo "================================================================"
+  echo "Test 2: installed runtime dependency scan"
   echo "================================================================"
 
   missing=0
   llvm_transitive=0
 
-  for file in $(find /out -type f); do
-    file "$file" | grep -q "ELF" || continue
+  for package in mesa-intel qemu-system-modules-opengl; do
+    for file in $(dpkg-query -L "$package"); do
+      [ -f "$file" ] || continue
+      file "$file" | grep -q "ELF" || continue
 
-    echo
-    echo "--- $file"
-    deps="$(ldd "$file" 2>&1 || true)"
-    printf '%s\n' "$deps"
+      echo
+      echo "--- $file"
+      deps="$(ldd "$file" 2>&1 || true)"
+      printf '%s\n' "$deps"
 
-    if printf '%s\n' "$deps" | grep -q 'not found'; then
-      missing=1
-    fi
+      if printf '%s\n' "$deps" | grep -q 'not found'; then
+        missing=1
+      fi
 
-    if printf '%s\n' "$deps" | grep -qi 'libLLVM'; then
-      llvm_transitive=1
-    fi
+      if printf '%s\n' "$deps" | grep -qi 'libLLVM'; then
+        llvm_transitive=1
+      fi
+    done
   done
 
   if [ "$missing" -ne 0 ]; then
@@ -211,17 +344,16 @@ RUN <<'EOF_VERIFY'
 
   echo
   echo "================================================================"
-  echo "Artifact size"
+  echo "Installed package status"
   echo "================================================================"
-  du -sh /out
-  bytes="$(tar -C /out -cf - . | gzip -9 -c | wc -c)"
-  mib="$(awk -v bytes="$bytes" 'BEGIN { printf "%.2f", bytes / 1048576 }')"
-  echo "gzip -9 payload: ${bytes} bytes (${mib} MiB)"
-
-  echo
-  echo "Exported files:"
-  find /out -type f -o -type l | sort
+  dpkg-query -W \
+    -f='${binary:Package}\t${Version}\n' \
+    mesa-intel \
+    qemu-system-x86 \
+    qemu-system-common \
+    qemu-system-modules-opengl \
+    libvirglrenderer1
 EOF_VERIFY
 
 FROM scratch AS artifact
-COPY --from=verify /out/ /
+COPY --from=verify /dist/ /
