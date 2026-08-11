@@ -8,6 +8,9 @@ ARG DEBIAN_FRONTEND="noninteractive"
 RUN <<'EOF_BUILD_DEPS'
   set -eu
 
+  apt-get update
+  apt-get install --no-install-recommends -y ca-certificates
+
   cat > /etc/apt/sources.list.d/debian-src.list <<'EOF_SOURCES'
 deb-src https://deb.debian.org/debian trixie main
 deb-src https://deb.debian.org/debian trixie-updates main
@@ -18,7 +21,6 @@ EOF_SOURCES
   apt-get build-dep -y mesa
   apt-get install --no-install-recommends -y \
     binutils \
-    ca-certificates \
     curl \
     file \
     gzip \
