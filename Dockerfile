@@ -285,14 +285,14 @@ RUN <<EOF_VERIFY
   echo "================================================================"
 
   for package in libgbm1 mesa-libgallium; do
-    if dpkg-query -W "$package" >/dev/null 2>&1; then
+    if dpkg-query -W -f='${Status}\n' "$package" 2>/dev/null | grep -q '^install ok installed$'; then
       echo "FAIL: unwanted package was installed: $package"
       exit 1
     fi
   done
 
-  if dpkg-query -W 'libllvm*' >/tmp/llvm-packages 2>/dev/null; then
-    cat /tmp/llvm-packages
+  if dpkg-query -W -f='${Status} ${binary:Package}\n' 'libllvm*' 2>/dev/null | grep -q '^install ok installed '; then
+    dpkg-query -W -f='${Status} ${binary:Package}\t${Version}\n' 'libllvm*' 2>/dev/null | grep '^install ok installed ' || true
     echo "FAIL: an LLVM runtime package was installed."
     exit 1
   fi
