@@ -7,52 +7,81 @@ Minimal Mesa runtime for Intel GPU acceleration in QEMU, without the full Xorg a
 - Intel GPU support for QEMU
 - Supports the Mesa `i915`, `crocus`, and `iris` Gallium drivers
 - EGL and GBM support for headless hardware rendering
+- Includes the matching QEMU OpenGL display modules
 - LLVM is used during compilation but excluded from the final runtime
 - No Xorg server or Intel Xorg DDX driver required
-- Produces a small runtime artifact suitable for copying into other container images
-- Verifies that exported libraries have no direct or transitive LLVM dependencies
+- Produces one self-contained Debian package
+- Provides `qemu-system-modules-opengl` and `libgbm1` without installing Debian's LLVM-backed Mesa runtime
+- Verifies that packaged libraries have no direct or transitive LLVM dependencies
 
 ## Build
 
-Build the runtime artifact with:
+Build the Debian package with:
 
 ```bash
 docker build \
   --progress=plain \
   --target artifact \
   --output type=local,dest=./dist \
+  --build-arg VERSION_ARG=1.00 \
   .
 ```
 
-The resulting Mesa runtime will be written to:
+The resulting package will be written to:
 
 ```text
-./dist
+./dist/mesa-intel_1.00_amd64.deb
 ```
+
+## Package
+
+The generated `mesa-intel` package contains:
+
+- Mesa `i915`, `crocus`, and `iris` Gallium drivers
+- EGL and GBM libraries for headless hardware rendering
+- QEMU OpenGL display modules matching the configured QEMU version
+
+The package version-provides both:
+
+```text
+qemu-system-modules-opengl
+libgbm1
+```
+
+and conflicts with/replaces their stock Debian packages. This lets other Debian packages satisfy their normal QEMU and GBM dependencies without pulling in `mesa-libgallium` and LLVM.
 
 ## Verification
 
-During the build, the runtime is automatically checked using both `readelf` and `ldd`.
+During the build, the package is automatically checked in two stages.
 
-The build will fail if:
+The first stage scans every packaged ELF object with `readelf` and fails if any object directly depends on `libLLVM`.
 
-- Any exported ELF object directly depends on `libLLVM`
+The finished package is then installed into a clean Debian Trixie image and checked with `ldd`. The build fails if:
+
+- Any runtime dependency cannot be resolved
 - LLVM appears anywhere in the runtime dependency tree
-- Any required shared library cannot be resolved
+- Debian's stock `libgbm1` is installed
+- `mesa-libgallium` is installed
+- Any `libllvm` runtime package is installed
 
-The build log also reports the final uncompressed and gzip-compressed artifact size.
+The full dependency output is printed in the Docker build log.
 
 ## Usage
 
-The generated runtime is intended to be copied into a QEMU container image instead of installing the full Mesa/Xorg graphics stack.
-
-For example:
+Install the release package together with the matching QEMU packages:
 
 ```dockerfile
-COPY --from=mesa-intel /usr/ /usr/
+ARG VERSION_MESA="1.00"
+
+RUN wget \
+    "https://github.com/qemus/mesa-intel/releases/download/v${VERSION_MESA}/mesa-intel_${VERSION_MESA}_amd64.deb" \
+    -O /tmp/mesa-intel.deb \
+ && apt-get update \
+ && apt-get --no-install-recommends -y install /tmp/mesa-intel.deb \
+ && rm -f /tmp/mesa-intel.deb
 ```
 
-The QEMU image still needs the matching QEMU OpenGL module, such as `qemu-system-modules-opengl`.
+The package itself carries the QEMU OpenGL module dependency and the Intel Mesa runtime, so consumers do not need to install `xserver-xorg-video-intel`, `qemu-system-modules-opengl`, `libgbm1`, or `mesa-libgallium` separately.
 
 ## Intel drivers
 
@@ -64,4 +93,4 @@ The runtime includes Mesa support for multiple generations of Intel integrated g
 
 ## License
 
-Mesa is distributed under its respective upstream licenses. See the Mesa source distribution for details.
+Mesa and QEMU are distributed under their respective upstream licenses. The generated package includes the relevant upstream copyright and license information.
