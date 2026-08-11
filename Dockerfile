@@ -97,7 +97,7 @@ RUN <<'EOF_RUNTIME'
     -Dgallium-xa=disabled \
     -Dgles1=disabled \
     -Dgles2=disabled \
-    -Dglvnd=disabled \
+    -Dglvnd=enabled \
     -Dglx=disabled \
     -Dintel-elk=true \
     -Dlibunwind=disabled \
@@ -131,9 +131,9 @@ RUN <<'EOF_RUNTIME'
   ' sh {} +
 EOF_RUNTIME
 
-# Package the Intel-only Mesa runtime as a replacement provider for libgbm1.
-# This lets Debian packages use the custom GBM implementation without pulling
-# the stock mesa-libgallium and LLVM runtime into the final image.
+# Package the Intel-only Mesa runtime as a replacement provider for libgbm1
+# and libegl-mesa0. Debian's GLVND loaders can then use the custom Mesa
+# implementation without pulling the stock Gallium and LLVM runtime.
 RUN <<EOF_PACKAGE
   set -eu
 
@@ -180,6 +180,8 @@ RUN <<EOF_PACKAGE
         echo "$owner" >> /tmp/depends
       done
 
+  printf '%s\n' libegl1 libopengl0 >> /tmp/depends
+
   sort -u /tmp/depends -o /tmp/depends
   depends="$(paste -sd, /tmp/depends | sed 's/,/, /g')"
   installed_size="$(du -sk /package/usr | cut -f1)"
@@ -192,9 +194,9 @@ Priority: optional
 Architecture: amd64
 Maintainer: qemus <qemus@users.noreply.github.com>
 Depends: ${depends}
-Provides: libgbm1 (= ${MESA_VERSION})
-Conflicts: libgbm1
-Replaces: libgbm1
+Provides: libgbm1 (= ${MESA_VERSION}), libegl-mesa0 (= ${MESA_VERSION})
+Conflicts: libgbm1, libegl-mesa0
+Replaces: libgbm1, libegl-mesa0
 Installed-Size: ${installed_size}
 Homepage: https://github.com/qemus/mesa-intel
 Description: Minimal Intel Mesa runtime for QEMU
@@ -284,7 +286,7 @@ RUN <<EOF_VERIFY
   echo "Package isolation"
   echo "================================================================"
 
-  for package in libgbm1 mesa-libgallium; do
+  for package in libgbm1 libegl-mesa0 mesa-libgallium; do
     if dpkg-query -W -f='${Status}\n' "$package" 2>/dev/null | grep -q '^install ok installed$'; then
       echo "FAIL: unwanted package was installed: $package"
       exit 1
@@ -297,7 +299,20 @@ RUN <<EOF_VERIFY
     exit 1
   fi
 
-  echo "PASS: stock libgbm1, mesa-libgallium and LLVM are absent."
+  echo "PASS: stock libgbm1, libegl-mesa0, mesa-libgallium and LLVM are absent."
+
+  echo
+  echo "================================================================"
+  echo "GLVND loader availability"
+  echo "================================================================"
+
+  for library in libEGL.so.1 libOpenGL.so.0; do
+    if ! ldconfig -p | grep -q "$library"; then
+      echo "FAIL: required GLVND loader is missing: $library"
+      exit 1
+    fi
+    echo "PASS: $library is available."
+  done
 
   echo
   echo "================================================================"
@@ -352,7 +367,10 @@ RUN <<EOF_VERIFY
     qemu-system-x86 \
     qemu-system-common \
     qemu-system-modules-opengl \
-    libvirglrenderer1
+    libvirglrenderer1 \
+    libegl1 \
+    libopengl0 \
+    libglvnd0
 EOF_VERIFY
 
 FROM scratch AS artifact
