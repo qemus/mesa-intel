@@ -5,25 +5,24 @@ FROM debian:trixie-slim AS builder
 ARG VERSION_ARG="0.0"
 ARG MESA_VERSION="25.0.7"
 ARG SPICE_VERSION="0.16.0"
+ARG DEBIAN_SNAPSHOT="20260809T204446Z"
 ARG DEBIAN_FRONTEND="noninteractive"
 
-RUN <<'EOF_BUILD_DEPS'
+RUN <<EOF_BUILD_DEPS
   set -eu
 
-  apt-get update
-  apt-get install --no-install-recommends -y ca-certificates
+  echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ sid main" \
+    > /etc/apt/sources.list.d/sid.list
 
-  cat > /etc/apt/sources.list.d/debian-src.list <<'EOF_SOURCES'
-deb-src https://deb.debian.org/debian trixie main
-deb-src https://deb.debian.org/debian trixie-updates main
-deb-src https://security.debian.org/debian-security trixie-security main
-EOF_SOURCES
+  echo "deb-src [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ sid main" \
+    > /etc/apt/sources.list.d/sid-src.list
 
   apt-get update
-  apt-get build-dep -y mesa
-  apt-get install --no-install-recommends -y \
+  apt-get -t sid build-dep -y mesa
+  apt-get --no-install-recommends -y -t sid install \
     binutils \
     bzip2 \
+    ca-certificates \
     curl \
     dpkg-dev \
     file \
