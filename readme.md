@@ -1,19 +1,65 @@
-# Mesa Intel
+# QEMU Minimal
 
-Minimal Mesa runtime for Intel GPU acceleration in QEMU, without the full Xorg and LLVM runtime stack.
+Minimal host graphics runtime for QEMU without the large dependency stacks pulled in by Debian's standard Mesa and SPICE server packages.
 
 ## Features
 
 - Intel GPU support for QEMU
 - Supports the Mesa `i915`, `crocus`, and `iris` Gallium drivers
 - EGL and GBM support for headless hardware rendering
-- LLVM is used during compilation but excluded from the final runtime
+- Minimal SPICE server runtime for QEMU QXL
+- Keeps Debian's official QEMU OpenGL and SPICE modules
+- Works independently of the QEMU point release because it contains no QEMU modules
+- LLVM is used during Mesa compilation but excluded from the final runtime
+- GStreamer, Opus, SASL, smartcard and optional SPICE compression support are excluded
 - No Xorg server or Intel Xorg DDX driver required
 - Produces one self-contained Debian package
-- Provides `libgbm1` without installing Debian's LLVM-backed Mesa runtime
-- Works independently of the QEMU point release because it contains no QEMU modules
-- Verifies compatibility with Debian's official `qemu-system-modules-opengl`
-- Verifies that packaged libraries have no direct or transitive LLVM dependencies
+
+## Package design
+
+The package version-provides:
+
+```text
+libgbm1
+libegl-mesa0
+libspice-server1
+```
+
+and conflicts with/replaces Debian's stock packages with those names. This lets Debian's official QEMU modules satisfy their normal runtime dependencies without pulling the larger stock dependency trees into the final image.
+
+The QEMU modules themselves are deliberately **not** included. Install these from Debian alongside the exact QEMU version:
+
+```text
+qemu-system-modules-opengl
+qemu-system-modules-spice
+```
+
+This keeps QEMU's module build stamps synchronized automatically. Updating QEMU from a point release such as `11.0.3` to `11.0.4` therefore does not require rebuilding `qemu-minimal`.
+
+## Mesa runtime
+
+The Mesa portion contains:
+
+- `i915` for older Intel GPUs
+- `crocus` for older Intel generations supported by Gallium Crocus
+- `iris` for newer Intel GPUs
+- EGL and GBM for headless rendering
+
+LLVM is available only while compiling Mesa. The final package is verified to contain no direct or transitive LLVM runtime dependency.
+
+## SPICE runtime
+
+The SPICE portion provides `libspice-server.so.1` for QEMU's QXL implementation while disabling optional features that are unnecessary for the project's VNC/noVNC display path:
+
+- GStreamer video codecs
+- Opus audio encoding
+- Cyrus SASL authentication
+- Smartcard support
+- LZ4 compression
+
+The mandatory SPICE server functionality remains built against Pixman, OpenSSL, libjpeg, zlib and GLib.
+
+This package is intended for using QXL through QEMU's normal display path, including QXL together with VNC. It is not intended to provide the full feature set of a conventional remote SPICE deployment.
 
 ## Build
 
@@ -31,70 +77,45 @@ docker build \
 The resulting package will be written to:
 
 ```text
-./dist/mesa-intel_1.00_amd64.deb
+./dist/qemu-minimal_1.00_amd64.deb
 ```
-
-## Package
-
-The generated `mesa-intel` package contains:
-
-- Mesa `i915`, `crocus`, and `iris` Gallium drivers
-- EGL and GBM libraries for headless hardware rendering
-
-The package version-provides:
-
-```text
-libgbm1
-```
-
-and conflicts with/replaces Debian's stock `libgbm1`. This lets packages such as `qemu-system-modules-opengl` satisfy their normal GBM dependency without pulling in `mesa-libgallium` and LLVM.
-
-The QEMU OpenGL modules themselves are not included. They are installed from Debian alongside the matching QEMU version, so QEMU module build stamps always stay synchronized with the QEMU binaries.
 
 ## Verification
 
-During the build, the package is automatically checked in two stages.
+The Docker build verifies the package in a clean Debian Trixie image together with Debian's official, version-matched QEMU OpenGL and SPICE modules.
 
-The first stage scans every packaged ELF object with `readelf` and fails if any object directly depends on `libLLVM`.
+The build fails if:
 
-The finished package is then installed into a clean Debian Trixie image together with the official `qemu-system-x86` and `qemu-system-modules-opengl` packages from the configured Debian Sid snapshot. The build fails if:
-
-- Any runtime dependency cannot be resolved
+- Debian's stock `libgbm1`, `libegl-mesa0`, `libspice-server1`, or `mesa-libgallium` is installed
 - LLVM appears anywhere in the runtime dependency tree
-- Debian's stock `libgbm1` is installed
-- `mesa-libgallium` is installed
-- Any `libllvm` runtime package is installed
+- The custom SPICE library links against GStreamer, Opus, SASL, LZ4, libcacard, or Orc
+- Any packaged or QEMU module runtime dependency cannot be resolved
+- QEMU cannot load `qxl-vga`
+- QEMU cannot remain running with QXL and its VNC display backend without a SPICE listener
 
-The full dependency output for both `mesa-intel` and the official QEMU OpenGL module is printed in the Docker build log.
+The full ELF dependency output is printed in the Docker build log.
 
 ## Usage
 
-Install the release package in the same APT transaction as the matching QEMU OpenGL module:
+Install `qemu-minimal` before or together with the matching Debian QEMU modules:
 
 ```dockerfile
-ARG VERSION_MESA="1.00"
+ARG VERSION_MINIMAL="1.0.0"
 ARG VERSION_QEMU="1:11.0.3+ds-2"
 
 RUN wget \
-    "https://github.com/qemus/mesa-intel/releases/download/v${VERSION_MESA}/mesa-intel_${VERSION_MESA}_amd64.deb" \
-    -O /tmp/mesa-intel.deb \
+    "https://github.com/qemus/qemu-minimal/releases/download/v${VERSION_MINIMAL}/qemu-minimal_${VERSION_MINIMAL}_amd64.deb" \
+    -O /tmp/qemu-minimal.deb \
  && apt-get update \
  && apt-get --no-install-recommends -y -t sid install \
-      /tmp/mesa-intel.deb \
+      /tmp/qemu-minimal.deb \
       "qemu-system-modules-opengl=${VERSION_QEMU}" \
- && rm -f /tmp/mesa-intel.deb
+      "qemu-system-modules-spice=${VERSION_QEMU}" \
+ && rm -f /tmp/qemu-minimal.deb
 ```
 
-Because `mesa-intel` provides `libgbm1`, APT can satisfy the QEMU OpenGL module's GBM dependency without installing Debian's stock `libgbm1`, `mesa-libgallium`, or LLVM runtime.
-
-## Intel drivers
-
-The runtime includes Mesa support for multiple generations of Intel integrated graphics:
-
-- `i915` for older Intel GPUs
-- `crocus` for older Intel generations supported by the Gallium Crocus driver
-- `iris` for newer Intel GPUs
+Because `qemu-minimal` provides the required Mesa and SPICE runtime package identities, APT can install the official QEMU modules without installing the stock Mesa Gallium/LLVM or full SPICE multimedia dependency chains.
 
 ## License
 
-Mesa is distributed under its respective upstream licenses. The generated package includes the relevant upstream copyright and license information.
+This repository is distributed under the MIT license. Mesa and SPICE are distributed under their respective upstream licenses; the generated package includes copies of their relevant license files.
