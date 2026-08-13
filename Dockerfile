@@ -11,21 +11,21 @@ ARG DEBIAN_FRONTEND="noninteractive"
 RUN <<EOF_BUILD_DEPS
   set -eu
 
-  # Bootstrap HTTPS support from the base distribution.
   apt-get update
   apt-get install --no-install-recommends -y ca-certificates
 
-  # Use only the pinned Sid snapshot for all build dependencies.
-  rm -f /etc/apt/sources.list.d/debian.sources
+  cat > /etc/apt/sources.list.d/debian-src.list <<'EOF_SOURCES'
+deb-src https://deb.debian.org/debian trixie main
+deb-src https://deb.debian.org/debian trixie-updates main
+deb-src https://security.debian.org/debian-security trixie-security main
+EOF_SOURCES
 
-  echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ sid main" \
-    > /etc/apt/sources.list.d/sid.list
-
-  echo "deb-src [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ sid main" \
-    > /etc/apt/sources.list.d/sid-src.list
-
+  # Keep Mesa's complete build environment on Trixie. Mesa 25.0.7 is known
+  # to build successfully against this toolchain.
   apt-get update
   apt-get build-dep -y mesa
+
+  # Install the normal SPICE build dependencies from Trixie as well.
   apt-get install --no-install-recommends -y \
     binutils \
     bzip2 \
@@ -36,7 +36,6 @@ RUN <<EOF_BUILD_DEPS
     libglib2.0-dev \
     libjpeg-dev \
     libpixman-1-dev \
-    libspice-protocol-dev \
     libssl-dev \
     meson \
     ninja-build \
@@ -46,6 +45,22 @@ RUN <<EOF_BUILD_DEPS
     xz-utils \
     zlib1g-dev
 
+  # SPICE 0.16 requires newer protocol headers than Trixie provides. Download
+  # only libspice-protocol-dev from the pinned Sid snapshot without allowing
+  # Sid to replace any other part of the build environment.
+  echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ sid main" \
+    > /etc/apt/sources.list.d/spice-snapshot.list
+
+  apt-get update
+
+  cd /tmp
+  apt-get download -t sid libspice-protocol-dev
+  dpkg -i ./libspice-protocol-dev_*.deb
+  rm -f ./libspice-protocol-dev_*.deb
+
+  echo "Using libspice-protocol-dev $(dpkg-query -W -f='${Version}' libspice-protocol-dev)"
+
+  rm -f /etc/apt/sources.list.d/spice-snapshot.list
   rm -rf /var/lib/apt/lists/*
 EOF_BUILD_DEPS
 
