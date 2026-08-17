@@ -4,15 +4,15 @@ Minimal host graphics runtime for QEMU without the large dependency stacks pulle
 
 ## Features
 
-- Intel GPU support for QEMU
-- Supports the Mesa `i915`, `crocus`, and `iris` Gallium drivers
+- Intel and AMD GPU support for QEMU
+- Supports the Mesa `i915`, `crocus`, `iris`, `r600`, and `radeonsi` Gallium drivers
 - EGL and GBM support for headless hardware rendering
 - Minimal SPICE server runtime for QEMU QXL
 - Keeps Debian's official QEMU OpenGL and SPICE modules
 - Works independently of the QEMU point release because it contains no QEMU modules
 - LLVM is used during Mesa compilation but excluded from the final runtime
 - GStreamer, Opus, SASL, smartcard and optional SPICE compression support are excluded
-- No Xorg server or Intel Xorg DDX driver required
+- No Xorg server or vendor-specific Xorg DDX driver required
 - Produces one self-contained Debian package
 
 ## Package design
@@ -43,9 +43,11 @@ The Mesa portion contains:
 - `i915` for older Intel GPUs
 - `crocus` for older Intel generations supported by Gallium Crocus
 - `iris` for newer Intel GPUs
+- `r600` for older AMD Radeon GPUs based on TeraScale
+- `radeonsi` for newer AMD Radeon GPUs based on GCN and RDNA
 - EGL and GBM for headless rendering
 
-LLVM is available only while compiling Mesa. The final package is verified to contain no direct or transitive LLVM runtime dependency.
+LLVM is available only while compiling Mesa build-time tools. The final Mesa runtime is built with both `-Dllvm=disabled` and `-Damd-use-llvm=false`, and the finished package is verified to contain no direct or transitive LLVM runtime dependency.
 
 ## SPICE runtime
 
