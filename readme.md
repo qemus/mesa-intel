@@ -1,8 +1,11 @@
-# QEMU Minimal
-
+<h1 align="center">QEMU Minimal<br />
+<div align="center">
+  
 [![Build]][build_url]
 [![Version]][release_url]
 [![Size]][release_url]
+
+</div></h1>
 
 Minimal host graphics runtime for QEMU without the large dependency stacks pulled in by Debian's standard Mesa and SPICE server packages.
 
