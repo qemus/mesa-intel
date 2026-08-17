@@ -1,5 +1,9 @@
 # QEMU Minimal
 
+[![Build]][build_url]
+[![Version]][release_url]
+[![Size]][release_url]
+
 Minimal host graphics runtime for QEMU without the large dependency stacks pulled in by Debian's standard Mesa and SPICE server packages.
 
 ## Features
@@ -118,6 +122,12 @@ RUN wget \
 
 Because `qemu-minimal` provides the required Mesa and SPICE runtime package identities, APT can install the official QEMU modules without installing the stock Mesa Gallium/LLVM or full SPICE multimedia dependency chains.
 
-## License
+## Stars 🌟
+[![Stargazers](https://raw.githubusercontent.com/star-stats/stars/refs/heads/data/charts/qemus-qemu-minimal.svg)](https://github.com/qemus/qemu-minimal/stargazers)
 
-This repository is distributed under the MIT license. Mesa and SPICE are distributed under their respective upstream licenses; the generated package includes copies of their relevant license files.
+[build_url]: https://github.com/qemus/qemu-minimal/
+[release_url]: https://github.com/qemus/qemu-minimal/releases/
+
+[Build]: https://github.com/qemus/qemu-minimal/actions/workflows/build.yml/badge.svg
+[Size]: https://img.shields.io/badge/size-18.4_MB-steelblue?style=flat&color=066da5
+[Version]: https://img.shields.io/github/v/tag/qemus/qemu-minimal?label=version&sort=semver&color=066da5
