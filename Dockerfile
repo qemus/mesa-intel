@@ -81,7 +81,7 @@ RUN <<EOF_SOURCE
 EOF_SOURCE
 
 # Build Mesa's shader compiler tools with LLVM available. These tools are used
-# only while compiling the final Intel drivers and are never packaged.
+# only while compiling the final runtime drivers and are never packaged.
 RUN <<'EOF_TOOLS'
   set -eu
 
@@ -107,9 +107,10 @@ RUN <<'EOF_TOOLS'
   install -Dm755 /build-tools/src/compiler/spirv/vtn_bindgen /usr/local/bin/vtn_bindgen
 EOF_TOOLS
 
-# Build only the Intel Gallium drivers needed for old and new Intel iGPUs.
+# Build the Intel and AMD Gallium drivers needed for broad x86 GPU support.
 # LLVM is explicitly disabled in this runtime build; the shader compiler tools
-# built above are used only to generate the embedded Iris shader data.
+# built above are used only to generate the embedded Iris shader data. AMD uses
+# the LLVM-free r600 compiler and RadeonSI ACO compiler paths.
 RUN <<'EOF_MESA'
   set -eu
 
@@ -119,11 +120,12 @@ RUN <<'EOF_MESA'
     --buildtype=release \
     --prefix=/usr \
     --libdir="lib/${multiarch}" \
+    -Damd-use-llvm=false \
     -Dbuild-tests=false \
     -Degl=enabled \
     -Degl-native-platform=drm \
     -Dgbm=enabled \
-    -Dgallium-drivers=i915,crocus,iris \
+    -Dgallium-drivers=i915,crocus,iris,r600,radeonsi \
     -Dgallium-nine=false \
     -Dgallium-opencl=disabled \
     -Dgallium-rusticl=false \
@@ -293,9 +295,9 @@ Replaces: libgbm1, libegl-mesa0, libspice-server1
 Installed-Size: ${installed_size}
 Homepage: https://github.com/qemus/qemu-minimal
 Description: Minimal graphics runtime for QEMU
- Provides an Intel-only Mesa runtime supporting i915, Crocus and Iris together
- with EGL and GBM, plus a minimal SPICE server runtime for QXL, without the
- LLVM, GStreamer, Opus, SASL, smartcard or optional compression runtimes.
+ Provides an Intel and AMD Mesa runtime supporting i915, Crocus, Iris, r600 and
+ RadeonSI together with EGL and GBM, plus a minimal SPICE server runtime for QXL,
+ without LLVM, GStreamer, Opus, SASL, smartcard or optional compression runtimes.
 EOF_CONTROL
 
   echo
