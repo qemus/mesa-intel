@@ -11,14 +11,14 @@ Run QEMU OpenGL and QXL on headless Debian hosts without installing an Xorg serv
 
 `qemu-minimal` provides the host-side Mesa and SPICE runtime needed by Debian's official QEMU OpenGL and SPICE modules. It keeps hardware-accelerated EGL/GBM rendering and QXL available on servers, containers, and appliance-style systems while leaving out runtime components that are unnecessary for this use case.
 
-## Features
+## Features ✨
 
 - Designed for headless Debian hosts with no Xorg server or desktop environment
 - Hardware-accelerated EGL and GBM rendering through Mesa on Intel and AMD GPUs
 - Supports the Mesa `i915`, `crocus`, `iris`, `r600`, and `radeonsi` Gallium drivers
 - QXL support through a reduced SPICE server runtime for QEMU's VNC display path
 
-## Package design
+## Package design 📦
 
 The package version-provides:
 
@@ -39,7 +39,7 @@ qemu-system-modules-spice
 
 This keeps QEMU's module build stamps synchronized automatically. Updating QEMU from a point release such as `11.0.3` to `11.0.4` therefore does not require rebuilding `qemu-minimal`.
 
-## Mesa runtime
+## Mesa runtime 🎨
 
 The Mesa portion contains:
 
@@ -52,7 +52,7 @@ The Mesa portion contains:
 
 LLVM is available only while compiling Mesa build-time tools. The final Mesa runtime is built with both `-Dllvm=disabled` and `-Damd-use-llvm=false`, and the finished package is verified to contain no direct or transitive LLVM runtime dependency.
 
-## SPICE runtime
+## SPICE runtime 🖥️
 
 The SPICE portion provides `libspice-server.so.1` for QEMU's QXL implementation while disabling optional features that are unnecessary for the project's VNC display path:
 
